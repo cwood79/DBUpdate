@@ -1,10 +1,7 @@
 import java.io.*;
 import java.sql.*;
-import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Scanner;
-import java.util.TimeZone;
-
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
 
@@ -38,65 +35,58 @@ public class DBUpdate {
 
     public static void parseCSV(String fileName) throws ClassNotFoundException, SQLException, IOException {
 
-        // Initialize JDBC database in memory
+        // Initialize sqlite database in memory
         Class.forName("org.sqlite.JDBC");
 
         conn=DriverManager.getConnection("jdbc:sqlite::memory:");
 
         Statement stmt=conn.createStatement();
-        ResultSet rs;
-
         stmt.executeUpdate("DROP TABLE IF EXISTS db");
-/*
+
         stmt.executeUpdate("CREATE TABLE db " +
                 "(A VARCHAR(100) NOT NULL, " +
                 "B VARCHAR(100) NOT NULL, " +
                 "C VARCHAR(100) NOT NULL, " +
-                "D VARCHAR(100) NOT NULL, " +
+                "D BOOLEAN NOT NULL, " +
                 "E VARCHAR(1500) NOT NULL, " +
                 "F VARCHAR(100) NOT NULL, " +
-                "G MONEY NOT NULL, " +
+                "G FLOAT NOT NULL, " +
                 "H BOOLEAN NOT NULL, " +
                 "I BOOLEAN NOT NULL, " +
                 "J VARCHAR(100) NOT NULL)");
-*/
-        stmt.executeUpdate("CREATE TABLE db " +
-                "(A VARCHAR(100), " +
-                "B VARCHAR(100), " +
-                "C VARCHAR(100), " +
-                "D VARCHAR(100), " +
-                "E VARCHAR(1500), " +
-                "F VARCHAR(100), " +
-                "G MONEY, " +
-                "H BOOLEAN, " +
-                "I BOOLEAN, " +
-                "J VARCHAR(100))");
 
         int recsReceive=0;
         int recsSuccess=0;
         int recsFail=0;
 
-        String badFileName="bad-data-"+getTimeStamp()+".csv";
-        String logFileName="dbstats-" + getTimeStamp()+".txt";
+        SimpleDateFormat sdf = new SimpleDateFormat(TSFORMAT);
+        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+
+        String timeString = sdf.format(timestamp);
+
+        String badFileName="bad-data-"+timeString+".csv";
+        String logFileName="dbstats-"+timeString+".txt";
 
         FileWriter fw = new FileWriter(badFileName);
 
+        // Iterate through records in csv
         Reader in = new FileReader(fileName);
         Iterable<CSVRecord> records = CSVFormat.EXCEL.withFirstRecordAsHeader()
-                                               .withNullString("")
-                                               .withIgnoreEmptyLines().parse(in);
+                                                .withIgnoreSurroundingSpaces()
+                                                .withNullString("")
+                                                .withIgnoreEmptyLines().parse(in);
         for (CSVRecord record: records)
         {
             recsReceive++;
 
-            if(!record.isConsistent())
+            // checking if number of columns in csv matches + checking for null columns
+            if(!record.isConsistent() || !checkRecord(record))
             {
                 recsFail++;
                 fw.write(record.toString()+"\r\n");
             }
             else
             {
-                System.out.println(record.get("A"));
                 recsSuccess++;
                 insertIntoDB(record);
             }
@@ -108,30 +98,48 @@ public class DBUpdate {
         // log stats
         logStats(logFileName,recsReceive,recsSuccess,recsFail);
 
+        selectAll();
+
         stmt.close();
         conn.close();
+
+        System.out.println("Database operation complete");
     }
 
-    public static void insertIntoDB(CSVRecord record) throws SQLException {
+    public static boolean checkRecord(CSVRecord record)
+    {
+        for(int i=0; i<record.size();i++)
+        {
+            if(record.get(i)==null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static void insertIntoDB(CSVRecord record) throws SQLException
+    {
         String sql = "INSERT INTO db VALUES(?,?,?,?,?,?,?,?,?,?)";
         PreparedStatement stmt = conn.prepareStatement(sql);
 
-        stmt.setString(1,record.get(0));
-        stmt.setString(2,record.get(1));
-        stmt.setString(3,record.get(2));
-        stmt.setString(4,record.get(3)); // TODO: fix gender
-        stmt.setString(5,record.get(4));
-        stmt.setString(6,record.get(5));
-        stmt.setFloat(7, 1.0f);//Float.parseFloat(record.get(6))); // TODO: fix money
-        stmt.setBoolean(8,Boolean.parseBoolean(record.get(7)));
-        stmt.setBoolean(9,Boolean.parseBoolean(record.get(8)));
-        stmt.setString(10,record.get(9));
+        stmt.setString(1,record.get("A"));
+        stmt.setString(2,record.get("B"));
+        stmt.setString(3,record.get("C"));
+        stmt.setBoolean(4,record.get("D").equals("Male"));
+        stmt.setString(5,record.get("E"));
+        stmt.setString(6,record.get("F"));
+        stmt.setFloat(7, 1.0f); // record.get(6) TODO: fix money
+        stmt.setBoolean(8,Boolean.parseBoolean(record.get("H")));
+        stmt.setBoolean(9,Boolean.parseBoolean(record.get("I")));
+        stmt.setString(10,record.get("J"));
 
         stmt.executeUpdate();
     }
 
-    public static void logStats(String logFileName,int recsReceive, int recsSuccess, int recsFail) throws IOException {
-
+    public static void logStats(String logFileName,int recsReceive, int recsSuccess, int recsFail) throws IOException
+    {
         FileWriter fw = new FileWriter(logFileName);
         fw.write("----Database Statisticss----\r\n");
         fw.write(recsReceive + " records received\r\n");
@@ -140,18 +148,30 @@ public class DBUpdate {
         fw.close();
     }
 
-    public static String getTimeStamp()
-    {
-        SimpleDateFormat sdf = new SimpleDateFormat(TSFORMAT);
-        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
-
-        return sdf.format(timestamp);
-    }
-
     // utility method to print database for testing
-    public static void printDatabase()
+    public static void selectAll()
     {
+        String sql = "SELECT * FROM db";
 
+        try (Statement stmt  = conn.createStatement();
+             ResultSet rs    = stmt.executeQuery(sql)){
 
+            // loop through the result set
+            while (rs.next()) {
+                System.out.println(rs.getString("A") +  "\t" +
+                                    rs.getString("B") + "\t" +
+                        rs.getString("C") + "\t" +
+                        rs.getBoolean("D") + "\t" +
+                        rs.getString("E") + "\t" +
+                        rs.getString("F") + "\t" +
+                        rs.getFloat("G") + "\t" +
+                        rs.getBoolean("H") + "\t" +
+                        rs.getBoolean("I") + "\t" +
+                        rs.getString("J"));
+
+            }
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
     }
 }
